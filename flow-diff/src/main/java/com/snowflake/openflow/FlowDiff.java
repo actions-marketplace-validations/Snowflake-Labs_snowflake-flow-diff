@@ -66,7 +66,7 @@ public class FlowDiff {
 
         System.out.println("> [!NOTE]");
         System.out.println("> This GitHub Action is created and maintained by [Snowflake](https://www.snowflake.com/).");
-        System.out.println("### Executing Datavolo Flow Diff for flow: `" + flowName + "`");
+        System.out.println("### Executing Snowflake Flow Diff for flow: " + flowName);
 
         for(FlowDifference diff : diffs) {
 
@@ -393,7 +393,13 @@ public class FlowDiff {
                 FlowComparatorVersionedStrategy.DEEP
             );
 
-        flowName = snapshotA.getFlowSnapshot().getFlow().getName();
+        if (snapshotA.getFlowSnapshot().getFlow() != null) {
+            flowName = "`" + snapshotA.getFlowSnapshot().getFlow().getName() + "`";
+        } else if (snapshotB.getFlowSnapshot().getFlow() != null) {
+            flowName = "`" + snapshotB.getFlowSnapshot().getFlow().getName() + "`";
+        } else {
+            flowName = "";
+        }
         parameterContexts = snapshotB.getFlowSnapshot().getParameterContexts();
 
         final SortedSet<FlowDifference> sortedDiffs = new TreeSet(new Comparator<FlowDifference>() {
