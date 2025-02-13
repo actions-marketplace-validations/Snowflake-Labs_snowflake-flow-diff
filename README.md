@@ -31,7 +31,11 @@ jobs:
 
       # getting the path of the flow definition that changed (only one expected for now)
       - id: files
-        uses: Ana06/get-changed-files@v1.2
+        uses: tj-actions/changed-files@v45
+        with:
+          since_last_remote_commit: true
+          files: |
+            **/*.json
 
       # checking out the code without the change of the PR
       - name: Checkout original code
