@@ -242,7 +242,7 @@ public class FlowDiff {
                 break;
             }
             case PROPERTY_ADDED: {
-                final String propKey = (String) diff.getValueB();
+                final String propKey = diff.getFieldName().get();
                 String propValue = null;
                 if (diff.getComponentB() instanceof VersionedProcessor) {
                     if (((VersionedProcessor) diff.getComponentB()).getPropertyDescriptors().get(propKey).isSensitive()) {
