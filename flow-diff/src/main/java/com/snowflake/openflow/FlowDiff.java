@@ -355,6 +355,13 @@ public class FlowDiff {
                 System.out.println("- In the Parameter Context `" + pdcPc.getName() + "` the description of the parameter `"
                         + paramKey + "` has changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                 break;
+            case PRIORITIZERS_CHANGED:
+                final VersionedConnection connectionPrio = (VersionedConnection) diff.getComponentA();
+                System.out.println("- The prioritizers for the connection `"
+                        + (isEmpty(connectionPrio.getName()) ? connectionPrio.getSelectedRelationships().toString() : connectionPrio.getName())
+                        + "` from `" + connectionPrio.getSource().getName() + "` to `" + connectionPrio.getDestination().getName()
+                        + "` changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
+                break;
             case SELECTED_RELATIONSHIPS_CHANGED:
                 final VersionedConnection connectionSRC = (VersionedConnection) diff.getComponentA();
                 System.out.println("- The selected relationships for the connection `"
