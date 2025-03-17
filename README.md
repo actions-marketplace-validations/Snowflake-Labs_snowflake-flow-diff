@@ -27,15 +27,31 @@ jobs:
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
           path: submitted-changes
 
       # getting the path of the flow definition that changed (only one expected for now)
-      - id: files
-        uses: tj-actions/changed-files@v45
-        with:
-          since_last_remote_commit: true
-          files: |
-            **/*.json
+      - name: Get changed files
+        id: files
+        run: |
+          cd submitted-changes
+          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
+          # Get all changed files using git diff-tree
+          git_output=$(git diff-tree --no-commit-id --name-only -r origin/${{ github.event.pull_request.base.ref }} HEAD)
+          # Filter to retain JSON files
+          changed_files=()
+          while IFS= read -r file; do
+            if [[ $file == *.json ]]; then
+              changed_files+=("$file")
+            fi
+          done <<< "$git_output"
+          # Join the array with spaces, properly handling filenames with spaces
+          joined_files=$(printf "%s " "${changed_files[@]}")
+          # Remove trailing space
+          joined_files="${joined_files% }"
+          # Set outputs
+          echo "all_changed_files=${joined_files}" >> $GITHUB_OUTPUT
 
       # checking out the code without the change of the PR
       - name: Checkout original code
@@ -50,8 +66,8 @@ jobs:
         uses: snowflake-labs/snowflake-flow-diff@v0
         id: flowdiff
         with:
-          flowA: 'original-code/${{ steps.files.outputs.all }}'
-          flowB: 'submitted-changes/${{ steps.files.outputs.all }}'
+          flowA: 'original-code/${{ steps.files.outputs.all_changed_files }}'
+          flowB: 'submitted-changes/${{ steps.files.outputs.all_changed_files }}'
 ```
 
 ## Example
