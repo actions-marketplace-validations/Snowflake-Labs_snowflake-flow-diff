@@ -122,8 +122,7 @@ public class FlowDiff {
             }
             case PROPERTY_CHANGED: {
                 System.out.println("- In " + printComponent(diff.getComponentA()) + ", the value of the property "
-                        + "`" + diff.getFieldName().get() + "` changed from `" + diff.getValueA()
-                        + "` to `" + diff.getValueB() + "`");
+                        + "`" + diff.getFieldName().get() + "` changed from " + printFromTo(diff.getValueA().toString(), diff.getValueB().toString()));
                 break;
             }
             case CONCURRENT_TASKS_CHANGED: {
@@ -297,10 +296,9 @@ public class FlowDiff {
                 final VersionedParameter paramBefore = pcBefore.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
                 final VersionedParameter paramAfter = pcAfter.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
                 System.out.println("- In the Parameter Context `" + pcAfter.getName()
-                        + "`, the value of the parameter `" + paramKey + "` has changed from `"
-                        + (paramBefore.isSensitive() ? "<Sensitive Value>" : paramBefore.getValue()) + "`"
-                        + " to `"
-                        + (paramAfter.isSensitive() ? "<Sensitive Value>" : paramAfter.getValue()) + "`");
+                        + "`, the value of the parameter `" + paramKey + "` has changed from "
+                        + printFromTo(paramBefore.isSensitive() ? "<Sensitive Value>" : paramBefore.getValue(),
+                                paramAfter.isSensitive() ? "<Sensitive Value>" : paramAfter.getValue()));
                 break;
             }
             case INHERITED_CONTEXTS_CHANGED:
@@ -327,7 +325,7 @@ public class FlowDiff {
                 final String paramKey = diff.getFieldName().get();
                 final VersionedParameterContext pdcPc = (VersionedParameterContext) diff.getComponentA();
                 System.out.println("- In the Parameter Context `" + pdcPc.getName() + "` the description of the parameter `"
-                        + paramKey + "` has changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
+                        + paramKey + "` has changed from " + printFromTo(diff.getValueA().toString(), diff.getValueB().toString()));
                 break;
             case PRIORITIZERS_CHANGED:
                 final VersionedConnection connectionPrio = (VersionedConnection) diff.getComponentA();
@@ -361,7 +359,7 @@ public class FlowDiff {
                 break;
             case COMMENTS_CHANGED:
                 System.out.println("- The comment for the " + printComponent(diff.getComponentA())
-                        + " has been changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
+                        + " has been changed from " + printFromTo(diff.getValueA().toString(), diff.getValueB().toString()));
                 break;
 
             default:
@@ -493,8 +491,19 @@ public class FlowDiff {
                 + proc.getPenaltyDuration() + "` penalty duration, `" + proc.getYieldDuration() + "` yield duration";
     }
 
+    static String printFromTo(final String from, final String to) {
+        if (isMultiline(from) || isMultiline(to)) {
+            return "\n```\n" + from + "\n```\nto\n```\n" + to + "\n```";
+        }
+        return "`" + from + "` to `" + to + "`";
+    }
+
     static boolean isEmpty(final String string) {
         return string == null || string.isEmpty();
+    }
+
+    static boolean isMultiline(String str) {
+        return str.contains("\n") || str.contains("\r");
     }
 
     static String substringAfterLast(final String str, final String separator) {
