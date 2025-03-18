@@ -110,6 +110,18 @@ public class FlowDiff {
             case COMPONENT_REMOVED: {
                 if (diff.getComponentA().getComponentType().equals(ComponentType.FUNNEL)) {
                     System.out.println("- A Funnel has been removed");
+                } else if (diff.getComponentA().getComponentType().equals(ComponentType.CONNECTION)) {
+                    final VersionedConnection connection = (VersionedConnection) diff.getComponentA();
+                    if (connection.getSource().getId().equals(connection.getDestination().getId())) {
+                        System.out.println("- A self-loop connection `"
+                                + (isEmpty(connection.getName()) ? connection.getSelectedRelationships().toString() : connection.getName())
+                                + "` has been removed from `" + connection.getSource().getName() + "`");
+                    } else {
+                        System.out.println("- A connection `"
+                                + (isEmpty(connection.getName()) ? connection.getSelectedRelationships().toString() : connection.getName())
+                                + "` from `" + connection.getSource().getName() + "` to `" + connection.getDestination().getName()
+                                + "` has been removed");
+                    }
                 } else {
                     System.out.println("- A " + printComponent(diff.getComponentA()) + " has been removed");
                 }
