@@ -28,6 +28,7 @@ import org.apache.nifi.flow.VersionedComponent;
 import org.apache.nifi.flow.VersionedConfigurableExtension;
 import org.apache.nifi.flow.VersionedConnection;
 import org.apache.nifi.flow.VersionedControllerService;
+import org.apache.nifi.flow.VersionedLabel;
 import org.apache.nifi.flow.VersionedParameter;
 import org.apache.nifi.flow.VersionedParameterContext;
 import org.apache.nifi.flow.VersionedProcessGroup;
@@ -100,6 +101,12 @@ public class FlowDiff {
                     System.out.println("- A " + printComponent(diff.getComponentB())
                             + " has been added with the below properties:");
                     printConfigurableExtensionProperties(cs);
+                } else if (diff.getComponentB().getComponentType().equals(ComponentType.LABEL)) {
+                    final VersionedLabel label = (VersionedLabel) diff.getComponentB();
+                    System.out.println("- A Label has been added with the below text:");
+                    System.out.println("```");
+                    System.out.println(label.getLabel());
+                    System.out.println("```");
                 } else {
                     System.out.println("- A " + diff.getComponentB().getComponentType().getTypeName()
                             + (isEmpty(diff.getComponentB().getName()) ? "" : " named `" + diff.getComponentB().getName() + "`")
