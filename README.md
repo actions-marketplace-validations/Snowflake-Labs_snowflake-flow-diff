@@ -36,22 +36,10 @@ jobs:
         id: files
         run: |
           cd submitted-changes
-          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
-          # Get all changed files using git diff-tree
-          git_output=$(git diff-tree --no-commit-id --name-only -r origin/${{ github.event.pull_request.base.ref }} HEAD)
-          # Filter to retain JSON files
-          changed_files=()
-          while IFS= read -r file; do
-            if [[ $file == *.json ]]; then
-              changed_files+=("$file")
-            fi
-          done <<< "$git_output"
-          # Join the array with spaces, properly handling filenames with spaces
-          joined_files=$(printf "%s " "${changed_files[@]}")
-          # Remove trailing space
-          joined_files="${joined_files% }"
-          # Set outputs
-          echo "all_changed_files=${joined_files}" >> $GITHUB_OUTPUT
+          # Get changed files since the merge base
+          changed_file=$(git diff --name-only $(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }}) HEAD | grep -m 1 '\.json$' || true)
+          # Set output (empty if no JSON file found)
+          echo "all_changed_files=$changed_file" >> $GITHUB_OUTPUT
 
       # checking out the code without the change of the PR
       - name: Checkout original code
