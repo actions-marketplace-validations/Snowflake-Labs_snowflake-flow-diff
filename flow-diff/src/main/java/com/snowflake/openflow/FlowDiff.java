@@ -384,6 +384,10 @@ public class FlowDiff {
                 System.out.println("- In " + printComponent(diff.getComponentA())
                         + ", the list of retried relationships changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                 break;
+            case PROPERTY_SENSITIVITY_CHANGED:
+                System.out.println("- In " + printComponent(diff.getComponentA()) + ", the sensitivity of the property `"
+                        + diff.getFieldName().get() + "` changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
+                break;
 
             default:
                 System.out.println("- " + diff.getDescription() + " (" + diff.getDifferenceType() + ")");
