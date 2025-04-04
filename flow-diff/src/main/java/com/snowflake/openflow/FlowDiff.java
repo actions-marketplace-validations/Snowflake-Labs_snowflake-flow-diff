@@ -58,6 +58,7 @@ public class FlowDiff {
 
     private static String flowName;
     private static Map<String, VersionedParameterContext> parameterContexts;
+    private static Map<String, VersionedProcessGroup> processGroups;
 
     public static void main(String[] args) throws IOException {
 
@@ -98,8 +99,9 @@ public class FlowDiff {
                     printConfigurableExtensionProperties(proc);
                 } else if (diff.getComponentB().getComponentType().equals(ComponentType.CONTROLLER_SERVICE)) {
                     final VersionedControllerService cs = (VersionedControllerService) diff.getComponentB();
+                    final String pgName = processGroups.get(cs.getGroupIdentifier()).getName();
                     System.out.println("- A " + printComponent(diff.getComponentB())
-                            + " has been added with the below properties:");
+                            + " has been added in Process Group `" + pgName + "` with the below properties:");
                     printConfigurableExtensionProperties(cs);
                 } else if (diff.getComponentB().getComponentType().equals(ComponentType.LABEL)) {
                     final VersionedLabel label = (VersionedLabel) diff.getComponentB();
@@ -415,6 +417,11 @@ public class FlowDiff {
         final FlowSnapshotContainer snapshotA = getFlowContainer(pathA, factory);
         final FlowSnapshotContainer snapshotB = getFlowContainer(pathB, factory);
 
+        processGroups = new HashMap<>();
+        VersionedProcessGroup rootPG = snapshotB.getFlowSnapshot().getFlowContents();
+        processGroups.put(rootPG.getIdentifier(), rootPG);
+        registerProcessGroups(rootPG);
+
         // identifier is null for parameter contexts, and we know that names are unique so setting name as id
         snapshotA.getFlowSnapshot().getParameterContexts().values().forEach(pc -> pc.setIdentifier(pc.getName()));
         snapshotB.getFlowSnapshot().getParameterContexts().values().forEach(pc -> pc.setIdentifier(pc.getName()));
@@ -467,6 +474,14 @@ public class FlowDiff {
         sortedDiffs.addAll(flowComparator.compare().getDifferences());
 
         return sortedDiffs;
+    }
+
+    private static void registerProcessGroups(VersionedProcessGroup rootPG) {
+        Set<VersionedProcessGroup> childPGs = rootPG.getProcessGroups();
+        for (VersionedProcessGroup pg : childPGs) {
+            processGroups.put(pg.getIdentifier(), pg);
+            registerProcessGroups(pg);
+        }
     }
 
     static FlowSnapshotContainer getFlowContainer(final String path, final JsonFactory factory) throws IOException {
