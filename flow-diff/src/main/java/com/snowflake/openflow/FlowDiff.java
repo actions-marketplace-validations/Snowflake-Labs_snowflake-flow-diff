@@ -385,6 +385,10 @@ public class FlowDiff {
                 System.out.println("- In " + printComponent(diff.getComponentA())
                         + ", the list of retried relationships changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                 break;
+            case LABEL_VALUE_CHANGED:
+                System.out.println("- A label has been updated and its text has been changed from "
+                        + printFromTo(diff.getValueA().toString(), diff.getValueB().toString()));
+                break;
 
             default:
                 System.out.println("- " + diff.getDescription() + " (" + diff.getDifferenceType() + ")");
