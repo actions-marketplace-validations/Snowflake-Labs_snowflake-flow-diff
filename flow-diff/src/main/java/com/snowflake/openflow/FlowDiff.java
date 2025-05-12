@@ -58,6 +58,7 @@ public class FlowDiff {
 
     private static String flowName;
     private static Map<String, VersionedParameterContext> parameterContexts;
+    private static Map<String, VersionedProcessGroup> processGroups;
 
     public static void main(String[] args) throws IOException {
 
@@ -98,8 +99,9 @@ public class FlowDiff {
                     printConfigurableExtensionProperties(proc);
                 } else if (diff.getComponentB().getComponentType().equals(ComponentType.CONTROLLER_SERVICE)) {
                     final VersionedControllerService cs = (VersionedControllerService) diff.getComponentB();
+                    final String pgName = processGroups.get(cs.getGroupIdentifier()).getName();
                     System.out.println("- A " + printComponent(diff.getComponentB())
-                            + " has been added with the below properties:");
+                            + " has been added in Process Group `" + pgName + "` with the below properties:");
                     printConfigurableExtensionProperties(cs);
                 } else if (diff.getComponentB().getComponentType().equals(ComponentType.LABEL)) {
                     final VersionedLabel label = (VersionedLabel) diff.getComponentB();
@@ -296,7 +298,8 @@ public class FlowDiff {
                 final VersionedParameterContext pc = (VersionedParameterContext) diff.getComponentB();
                 final VersionedParameter param = pc.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
                 System.out.println("- In the Parameter Context `" + pc.getName() + "` a parameter has been added: `"
-                        + paramKey + "` = `" + (param.isSensitive() ? "<Sensitive Value>" : param.getValue()) + "`");
+                        + paramKey + "` = `" + (param.isSensitive() ? "<Sensitive Value>" : param.getValue()) + "`"
+                        + (isEmpty(param.getDescription()) ? "" : " with the description `" + param.getDescription() + "`"));
                 break;
             }
             case PARAMETER_REMOVED: {
@@ -384,6 +387,10 @@ public class FlowDiff {
                 System.out.println("- In " + printComponent(diff.getComponentA())
                         + ", the list of retried relationships changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                 break;
+            case LABEL_VALUE_CHANGED:
+                System.out.println("- A label has been updated and its text has been changed from "
+                        + printFromTo(diff.getValueA().toString(), diff.getValueB().toString()));
+                break;
             case PROPERTY_SENSITIVITY_CHANGED:
                 System.out.println("- In " + printComponent(diff.getComponentA()) + ", the sensitivity of the property `"
                         + diff.getFieldName().get() + "` changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
@@ -418,6 +425,11 @@ public class FlowDiff {
         final JsonFactory factory = new JsonFactory(objectMapper);
         final FlowSnapshotContainer snapshotA = getFlowContainer(pathA, factory);
         final FlowSnapshotContainer snapshotB = getFlowContainer(pathB, factory);
+
+        processGroups = new HashMap<>();
+        VersionedProcessGroup rootPG = snapshotB.getFlowSnapshot().getFlowContents();
+        processGroups.put(rootPG.getIdentifier(), rootPG);
+        registerProcessGroups(rootPG);
 
         // identifier is null for parameter contexts, and we know that names are unique so setting name as id
         snapshotA.getFlowSnapshot().getParameterContexts().values().forEach(pc -> pc.setIdentifier(pc.getName()));
@@ -471,6 +483,14 @@ public class FlowDiff {
         sortedDiffs.addAll(flowComparator.compare().getDifferences());
 
         return sortedDiffs;
+    }
+
+    private static void registerProcessGroups(VersionedProcessGroup rootPG) {
+        Set<VersionedProcessGroup> childPGs = rootPG.getProcessGroups();
+        for (VersionedProcessGroup pg : childPGs) {
+            processGroups.put(pg.getIdentifier(), pg);
+            registerProcessGroups(pg);
+        }
     }
 
     static FlowSnapshotContainer getFlowContainer(final String path, final JsonFactory factory) throws IOException {
