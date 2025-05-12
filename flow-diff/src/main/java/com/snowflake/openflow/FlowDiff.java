@@ -538,7 +538,7 @@ public class FlowDiff {
         }
 
         if (!connection.getFlowFileExpiration().equals("0 sec")) {
-            nonDefaultConfigurations.add("flow file expiration of `" + connection.getFlowFileExpiration() + "`");
+            nonDefaultConfigurations.add("FlowFile expiration of `" + connection.getFlowFileExpiration() + "`");
         }
 
         if (!connection.getBackPressureDataSizeThreshold().equals("1 GB")) {
