@@ -296,7 +296,8 @@ public class FlowDiff {
                 final VersionedParameterContext pc = (VersionedParameterContext) diff.getComponentB();
                 final VersionedParameter param = pc.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
                 System.out.println("- In the Parameter Context `" + pc.getName() + "` a parameter has been added: `"
-                        + paramKey + "` = `" + (param.isSensitive() ? "<Sensitive Value>" : param.getValue()) + "`");
+                        + paramKey + "` = `" + (param.isSensitive() ? "<Sensitive Value>" : param.getValue()) + "`"
+                        + (isEmpty(param.getDescription()) ? "" : " with the description `" + param.getDescription() + "`"));
                 break;
             }
             case PARAMETER_REMOVED: {
@@ -383,6 +384,10 @@ public class FlowDiff {
             case RETRIED_RELATIONSHIPS_CHANGED:
                 System.out.println("- In " + printComponent(diff.getComponentA())
                         + ", the list of retried relationships changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
+                break;
+            case LABEL_VALUE_CHANGED:
+                System.out.println("- A label has been updated and its text has been changed from "
+                        + printFromTo(diff.getValueA().toString(), diff.getValueB().toString()));
                 break;
             case EXECUTION_MODE_CHANGED:
                 System.out.println("- In " + printComponent(diff.getComponentA())
