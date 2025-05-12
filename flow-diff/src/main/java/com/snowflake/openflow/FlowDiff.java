@@ -44,10 +44,12 @@ import org.apache.nifi.registry.flow.diff.StandardFlowComparator;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
@@ -82,16 +84,7 @@ public class FlowDiff {
                     System.out.println("- A Funnel has been added");
                 } else if (diff.getComponentB().getComponentType().equals(ComponentType.CONNECTION)) {
                     final VersionedConnection connection = (VersionedConnection) diff.getComponentB();
-                    if (connection.getSource().getId().equals(connection.getDestination().getId())) {
-                        System.out.println("- A self-loop connection `"
-                                + (isEmpty(connection.getName()) ? connection.getSelectedRelationships().toString() : connection.getName())
-                                + "` has been added on `" + connection.getSource().getName() + "`");
-                    } else {
-                        System.out.println("- A connection `"
-                                + (isEmpty(connection.getName()) ? connection.getSelectedRelationships().toString() : connection.getName())
-                                + "` from `" + connection.getSource().getName() + "` to `" + connection.getDestination().getName()
-                                + "` has been added");
-                    }
+                    printConnection(connection);
                 } else if (diff.getComponentB().getComponentType().equals(ComponentType.PROCESSOR)) {
                     final VersionedProcessor proc = (VersionedProcessor) diff.getComponentB();
                     System.out.println("- A " + printComponent(diff.getComponentB())
@@ -540,6 +533,55 @@ public class FlowDiff {
                 + proc.getRunDurationMillis() + "ms` run duration, `" + proc.getBulletinLevel() + "` bulletin level, `"
                 + proc.getSchedulingStrategy() + "` (`" + proc.getSchedulingPeriod() + "`), `"
                 + proc.getPenaltyDuration() + "` penalty duration, `" + proc.getYieldDuration() + "` yield duration";
+    }
+
+    static void printConnection(final VersionedConnection connection) {
+        String message;
+        if (connection.getSource().getId().equals(connection.getDestination().getId())) {
+            message = "- A self-loop connection `"
+                    + (isEmpty(connection.getName()) ? connection.getSelectedRelationships().toString() : connection.getName())
+                    + "` has been added on `" + connection.getSource().getName() + "`";
+        } else {
+            message = "- A connection `"
+                    + (isEmpty(connection.getName()) ? connection.getSelectedRelationships().toString() : connection.getName())
+                    + "` from `" + connection.getSource().getName() + "` to `" + connection.getDestination().getName()
+                    + "` has been added";
+        }
+
+        List<String> nonDefaultConfigurations = new ArrayList<>();
+
+        if (!connection.getLoadBalanceStrategy().equals("DO_NOT_LOAD_BALANCE")) {
+            String lbConfiguration = "load balancing strategy `" + connection.getLoadBalanceStrategy() + "`";
+            if (connection.getLoadBalanceStrategy().equals("PARTITION_BY_ATTRIBUTE")) {
+                lbConfiguration += " and partitioning attribute `" + connection.getPartitioningAttribute() + "`";
+            }
+            if (!connection.getLoadBalanceCompression().equals("DO_NOT_COMPRESS")) {
+                lbConfiguration += " and load balancing compression `" + connection.getLoadBalanceCompression() + "`";
+            }
+            nonDefaultConfigurations.add(lbConfiguration);
+        }
+
+        if (!connection.getPrioritizers().isEmpty()) {
+            nonDefaultConfigurations.add("prioritizers `" + connection.getPrioritizers() + "`");
+        }
+
+        if (!connection.getFlowFileExpiration().equals("0 sec")) {
+            nonDefaultConfigurations.add("FlowFile expiration of `" + connection.getFlowFileExpiration() + "`");
+        }
+
+        if (!connection.getBackPressureDataSizeThreshold().equals("1 GB")) {
+            nonDefaultConfigurations.add("backpressure data size threshold of `" + connection.getBackPressureDataSizeThreshold() + "`");
+        }
+
+        if (connection.getBackPressureObjectThreshold() != 10000) {
+            nonDefaultConfigurations.add("backpressure object threshold of `" + connection.getBackPressureObjectThreshold() + "`");
+        }
+
+        if (nonDefaultConfigurations.size() > 0) {
+            message += ". The connection is configured with " + String.join(", ", nonDefaultConfigurations);
+        }
+
+        System.out.println(message);
     }
 
     static String printFromTo(final String from, final String to) {
