@@ -102,6 +102,11 @@ public class FlowDiff {
                     System.out.println("```");
                     System.out.println(label.getLabel());
                     System.out.println("```");
+                } else if (diff.getComponentB().getComponentType().equals(ComponentType.PARAMETER_CONTEXT)) {
+                    final VersionedParameterContext paramContext = (VersionedParameterContext) diff.getComponentB();
+                    System.out.println("- A Parameter Context named `" + paramContext.getName() + "` with parameters `"
+                            + printParameterContext(paramContext) + "` and inheriting from `"
+                            + paramContext.getInheritedParameterContexts() + "` has been added");
                 } else {
                     System.out.println("- A " + diff.getComponentB().getComponentType().getTypeName()
                             + (isEmpty(diff.getComponentB().getName()) ? "" : " named `" + diff.getComponentB().getName() + "`")
