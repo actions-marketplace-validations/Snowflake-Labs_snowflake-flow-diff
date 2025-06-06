@@ -84,8 +84,8 @@ To enable checkstyle:
         uses: snowflake-labs/snowflake-flow-diff@v0
         id: flowdiff
         with:
-          flowA: 'original-code/${{ steps.files.outputs.all_changed_files }}'
-          flowB: 'submitted-changes/${{ steps.files.outputs.all_changed_files }}'
+          flowA: ${{ steps.files.outputs.flowA }}
+          flowB: ${{ steps.files.outputs.flowB }}
           checkstyle: true
 ```
 
@@ -98,7 +98,8 @@ Here is an example of what the comment could look like:
 ### Executing Snowflake Flow Diff for flow: `MyExample`
 
 #### Checkstyle Violations
-- Processor named `UpdateAttribute` is configured with 4 concurrent tasks
+> [!CAUTION]
+> - Processor named `UpdateAttribute` is configured with 4 concurrent tasks
 
 #### Flow Changes
 - The destination of a connection has changed from `UpdateAttribute` to `InvokeHTTP`

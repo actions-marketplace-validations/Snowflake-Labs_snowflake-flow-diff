@@ -102,8 +102,9 @@ public class FlowDiff {
 
         if (checkstyleEnabled && checkstyleViolations != null && !checkstyleViolations.isEmpty()) {
             System.out.println("#### Checkstyle Violations");
+            System.out.println("> [!CAUTION]");
             for (String violation : checkstyleViolations) {
-                System.out.println("- " + violation);
+                System.out.println("> - " + violation);
             }
             System.out.println("");
         }
@@ -475,7 +476,7 @@ public class FlowDiff {
         registerProcessGroups(rootPG);
 
         if (checkstyleEnabled) {
-            checkstyleViolations = FlowCheckstyle.getCheckstyleViolations(rootPG);
+            checkstyleViolations = FlowCheckstyle.getCheckstyleViolations(snapshotB);
         }
 
         if (noOriginalFlow) {

@@ -18,18 +18,31 @@ package com.snowflake.openflow;
 
 import org.apache.nifi.flow.VersionedProcessGroup;
 import org.apache.nifi.flow.VersionedProcessor;
+import org.apache.nifi.registry.flow.FlowSnapshotContainer;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class FlowCheckstyle {
 
-    public static List<String> getCheckstyleViolations(final VersionedProcessGroup flow) {
+    public static List<String> getCheckstyleViolations(final FlowSnapshotContainer flowSnapshotContainer) {
         final List<String> violations = new ArrayList<>();
+        VersionedProcessGroup rootProcessGroup = flowSnapshotContainer.getFlowSnapshot().getFlowContents();
 
         // check concurrent tasks
-        violations.addAll(checkConcurrentTasks(flow));
+        violations.addAll(checkConcurrentTasks(rootProcessGroup));
 
+        // check that snapshot metadata is present
+        violations.addAll(checkSnapshotMetadata(flowSnapshotContainer));
+
+        return violations;
+    }
+
+    private static List<String> checkSnapshotMetadata(FlowSnapshotContainer flowSnapshotContainer) {
+        final List<String> violations = new ArrayList<>();
+        if (flowSnapshotContainer.getFlowSnapshot().getSnapshotMetadata() == null) {
+            violations.add("Flow snapshot metadata is missing");
+        }
         return violations;
     }
 
