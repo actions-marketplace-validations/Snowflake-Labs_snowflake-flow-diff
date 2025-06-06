@@ -617,7 +617,8 @@
         "description" : "",
         "name" : "secured",
         "provided" : false,
-        "sensitive" : true
+        "sensitive" : false,
+		"value": ""
       } ]
     },
     "Test Parameter Context" : {

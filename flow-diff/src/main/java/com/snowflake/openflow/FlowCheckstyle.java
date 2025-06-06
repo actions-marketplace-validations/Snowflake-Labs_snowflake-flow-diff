@@ -16,6 +16,7 @@
  */
 package com.snowflake.openflow;
 
+import org.apache.nifi.flow.VersionedParameter;
 import org.apache.nifi.flow.VersionedProcessGroup;
 import org.apache.nifi.flow.VersionedProcessor;
 import org.apache.nifi.registry.flow.FlowSnapshotContainer;
@@ -34,6 +35,27 @@ public class FlowCheckstyle {
 
         // check that snapshot metadata is present
         violations.addAll(checkSnapshotMetadata(flowSnapshotContainer));
+
+        // check that no parameter is set to empty string
+        violations.addAll(checkEmptyParameters(flowSnapshotContainer));
+
+        return violations;
+    }
+
+    private static List<String> checkEmptyParameters(FlowSnapshotContainer flowSnapshotContainer) {
+        final List<String> violations = new ArrayList<>();
+        final List<VersionedParameter> parameters = flowSnapshotContainer.getFlowSnapshot()
+                .getParameterContexts()
+                .values()
+                .stream()
+                .flatMap(context -> context.getParameters().stream())
+                .toList();
+
+        for (VersionedParameter parameter : parameters) {
+            if (parameter.getValue() != null && parameter.getValue().isEmpty()) {
+                violations.add("Parameter named `" + parameter.getName() + "` is set to empty string");
+            }
+        }
 
         return violations;
     }
