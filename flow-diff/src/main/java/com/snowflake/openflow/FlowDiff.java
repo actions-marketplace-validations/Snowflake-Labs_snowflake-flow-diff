@@ -65,15 +65,39 @@ public class FlowDiff {
 
     public static void main(String[] args) throws IOException {
 
-        final String pathA = args[0];
-        final String pathB = args[1];
-        final boolean checkstyleEnabled = Boolean.parseBoolean(args[2]);
+        final List<String> pathsA = List.of(args[0].split(",")).stream().map(String::trim).toList();
+        final List<String> pathsB = List.of(args[1].split(",")).stream().map(String::trim).toList();
 
-        final Set<FlowDifference> diffs = getDiff(pathA, pathB, checkstyleEnabled);
-        final Set<String> bundleChanges = new HashSet<>();
+        final boolean checkstyleEnabled = Boolean.parseBoolean(args[2]);
 
         System.out.println("> [!NOTE]");
         System.out.println("> This GitHub Action is created and maintained by [Snowflake](https://www.snowflake.com/).");
+        System.out.println("");
+
+        if (pathsA.size() != pathsB.size()) {
+            System.out.println("The action didn't properly identify the files to compare. Please check the input files.");
+            return;
+        } else {
+            System.out.println("Identified " + pathsA.size() + " changed flows in this Pull Request.");
+        }
+
+        for (int i = 0; i < pathsA.size(); i++) {
+
+            System.out.println("");
+
+            flowName = "";
+            parameterContexts = new HashMap<>();
+            processGroups = new HashMap<>();
+
+            executeFlowDiffForOneFlow(pathsA.get(i), pathsB.get(i), checkstyleEnabled);
+        }
+
+    }
+
+    private static void executeFlowDiffForOneFlow(final String pathA, final String pathB, final boolean checkstyleEnabled) throws IOException {
+        final Set<FlowDifference> diffs = getDiff(pathA, pathB, checkstyleEnabled);
+        final Set<String> bundleChanges = new HashSet<>();
+
         System.out.println("### Executing Snowflake Flow Diff for flow: " + flowName);
 
         if (checkstyleEnabled && checkstyleViolations != null && !checkstyleViolations.isEmpty()) {
@@ -425,7 +449,7 @@ public class FlowDiff {
             }
         }
     }
-    
+
     public static Set<FlowDifference> getDiff(final String pathA, final String pathB, final boolean checkstyleEnabled) throws IOException {
         final ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
