@@ -140,7 +140,7 @@
       },
       "comments" : "",
       "componentType" : "PROCESSOR",
-      "concurrentlySchedulableTaskCount" : 1,
+      "concurrentlySchedulableTaskCount" : 5,
       "executionNode" : "ALL",
       "groupIdentifier" : "flow-contents-group",
       "identifier" : "1a59f65f-8b3a-3db9-982e-e0d334bd7e9c",
@@ -617,7 +617,8 @@
         "description" : "",
         "name" : "secured",
         "provided" : false,
-        "sensitive" : true
+        "sensitive" : false,
+        "value": ""
       } ]
     },
     "Test Parameter Context" : {
@@ -633,10 +634,5 @@
       } ]
     }
   },
-  "parameterProviders" : { },
-  "snapshotMetadata" : {
-    "author" : "pvillard@datavolo.io",
-    "flowIdentifier" : "test",
-    "timestamp" : 0
-  }
+  "parameterProviders" : { }
 }
