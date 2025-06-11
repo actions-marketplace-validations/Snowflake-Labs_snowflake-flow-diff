@@ -631,6 +631,17 @@
         "provided" : false,
         "sensitive" : false,
         "value" : "newValue"
+      }, {
+        "description" : "",
+        "name" : "should Not Have Default",
+        "provided" : false,
+        "sensitive" : false,
+        "value": "default"
+      }, {
+        "description" : "",
+        "name" : "should Have Default",
+        "provided" : false,
+        "sensitive" : false
       } ]
     }
   },
