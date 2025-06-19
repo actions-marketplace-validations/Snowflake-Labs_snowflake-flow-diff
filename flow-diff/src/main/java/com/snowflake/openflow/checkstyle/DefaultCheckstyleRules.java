@@ -2,9 +2,14 @@ package com.snowflake.openflow.checkstyle;
 
 import com.snowflake.openflow.checkstyle.CheckstyleRulesConfig.RuleConfig;
 import org.apache.commons.lang3.NotImplementedException;
+import org.apache.nifi.flow.VersionedControllerService;
 import org.apache.nifi.flow.VersionedParameter;
 import org.apache.nifi.flow.VersionedProcessGroup;
 import org.apache.nifi.flow.VersionedProcessor;
+import org.apache.nifi.parameter.ExpressionLanguageAgnosticParameterParser;
+import org.apache.nifi.parameter.ParameterParser;
+import org.apache.nifi.parameter.ParameterReference;
+import org.apache.nifi.parameter.ParameterTokenList;
 import org.apache.nifi.registry.flow.FlowSnapshotContainer;
 
 import java.util.ArrayList;
@@ -135,6 +140,86 @@ public enum DefaultCheckstyleRules implements CheckstyleRule {
             }
 
             return violations;
+        }
+    },
+
+    UNUSED_PARAMETER("unusedParameter") {
+        @Override
+        public List<String> check(final FlowSnapshotContainer container, final String flowName, final RuleConfig config) {
+            final List<String> violations = new ArrayList<>();
+            final List<VersionedParameter> parameters = container.getFlowSnapshot()
+                    .getParameterContexts()
+                    .values()
+                    .stream()
+                    .flatMap(context -> context.getParameters().stream())
+                    .toList();
+
+            for (VersionedParameter parameter : parameters) {
+                if (!isParameterReferenced(container, parameter.getName())) {
+                    violations.add("Parameter named `" + parameter.getName() + "` is not used anywhere in the flow");
+                }
+            }
+
+            return violations;
+        }
+
+        private boolean isParameterReferenced(final FlowSnapshotContainer container, final String parameterName) {
+            final ParameterParser parser = new ExpressionLanguageAgnosticParameterParser();
+            final VersionedProcessGroup rootProcessGroup = container.getFlowSnapshot().getFlowContents();
+            if (rootProcessGroup == null) {
+                return false;
+            }
+
+            return isParameterReferenced(rootProcessGroup, parameterName, parser);
+        }
+
+        private boolean isParameterReferenced(final VersionedProcessGroup group, final String parameterName, final ParameterParser parser) {
+            if (group.getProcessors() != null) {
+                for (final VersionedProcessor processor : group.getProcessors()) {
+                    if (isParameterReferenced(processor.getProperties(), parameterName, parser)) {
+                        return true;
+                    }
+                }
+            }
+
+            if (group.getControllerServices() != null) {
+                for (final VersionedControllerService service : group.getControllerServices()) {
+                    if (isParameterReferenced(service.getProperties(), parameterName, parser)) {
+                        return true;
+                    }
+                }
+            }
+
+            if (group.getProcessGroups() != null) {
+                for (final VersionedProcessGroup child : group.getProcessGroups()) {
+                    if (isParameterReferenced(child, parameterName, parser)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private boolean isParameterReferenced(final Map<String, String> properties, final String parameterName, final ParameterParser parser) {
+            if (properties == null) {
+                return false;
+            }
+
+            for (final String value : properties.values()) {
+                if (value == null) {
+                    continue;
+                }
+
+                final ParameterTokenList tokenList = parser.parseTokens(value);
+                for (final ParameterReference reference : tokenList.toReferenceList()) {
+                    if (parameterName.equals(reference.getParameterName())) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
     };
 

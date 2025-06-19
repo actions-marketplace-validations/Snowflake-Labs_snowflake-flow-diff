@@ -34,6 +34,7 @@ import org.apache.nifi.flow.VersionedParameter;
 import org.apache.nifi.flow.VersionedParameterContext;
 import org.apache.nifi.flow.VersionedProcessGroup;
 import org.apache.nifi.flow.VersionedProcessor;
+import org.apache.nifi.flow.VersionedPropertyDescriptor;
 import org.apache.nifi.registry.flow.FlowSnapshotContainer;
 import org.apache.nifi.registry.flow.RegisteredFlowSnapshot;
 import org.apache.nifi.registry.flow.diff.ConciseEvolvingDifferenceDescriptor;
@@ -285,18 +286,12 @@ public class FlowDiff {
                 case PROPERTY_ADDED: {
                     final String propKey = diff.getFieldName().get();
                     String propValue = null;
-                    if (diff.getComponentB() instanceof VersionedProcessor) {
-                        if (((VersionedProcessor) diff.getComponentB()).getPropertyDescriptors().get(propKey).isSensitive()) {
+                    if (diff.getComponentB() instanceof VersionedConfigurableExtension) {
+                        final VersionedPropertyDescriptor propertyDescriptor = ((VersionedConfigurableExtension) diff.getComponentB()).getPropertyDescriptors().get(propKey);
+                        if (propertyDescriptor != null && propertyDescriptor.isSensitive()) {
                             propValue = "<Sensitive Value>";
                         } else {
-                            propValue = ((VersionedProcessor) diff.getComponentB()).getProperties().get(propKey);
-                        }
-                    }
-                    if (diff.getComponentB() instanceof VersionedControllerService) {
-                        if (((VersionedControllerService) diff.getComponentB()).getPropertyDescriptors().get(propKey).isSensitive()) {
-                            propValue = "<Sensitive Value>";
-                        } else {
-                            propValue = ((VersionedControllerService) diff.getComponentB()).getProperties().get(propKey);
+                            propValue = ((VersionedConfigurableExtension) diff.getComponentB()).getProperties().get(propKey);
                         }
                     }
                     System.out.println("- In " + printComponent(diff.getComponentA())

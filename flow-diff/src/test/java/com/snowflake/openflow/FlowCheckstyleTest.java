@@ -90,4 +90,14 @@ class FlowCheckstyleTest {
         assertEquals(1, violations.size());
         assertTrue(violations.stream().anyMatch(v -> v.contains("Parameter named `addedParam` is set with value `addedValue` and is not configured as a parameter that should have a default value")));
     }
+
+    @Test
+    void testUnusedParameter() throws IOException {
+        FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("unusedParameter"), null, null);
+        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(2, violations.size());
+        assertTrue(violations.stream().anyMatch(v -> v.contains("Parameter named `newSensitiveParam` is not used anywhere in the flow")));
+        assertTrue(violations.stream().anyMatch(v -> v.contains("Parameter named `secured` is not used anywhere in the flow")));
+    }
 }
