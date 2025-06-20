@@ -38,7 +38,7 @@ public class FlowCheckstyle {
                 .filter(rule -> rule.ruleApplies(includes, excludes, config, flowName))
                 .forEach(rule -> {
                     final RuleConfig ruleConfig = config == null || config.rules() == null ? null : config.rules().get(rule.id());
-                    violations.addAll(rule.check(flowSnapshotContainer, flowName, ruleConfig));
+                    violations.addAll(rule.implementation().check(flowSnapshotContainer, flowName, ruleConfig));
                 });
 
         return violations;

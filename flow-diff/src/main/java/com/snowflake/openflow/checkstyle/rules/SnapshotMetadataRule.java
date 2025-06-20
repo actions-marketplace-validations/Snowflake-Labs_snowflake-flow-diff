@@ -14,14 +14,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.snowflake.openflow.checkstyle;
+package com.snowflake.openflow.checkstyle.rules;
 
+import com.snowflake.openflow.checkstyle.CheckstyleRule;
+import com.snowflake.openflow.checkstyle.CheckstyleRulesConfig.RuleConfig;
 import org.apache.nifi.registry.flow.FlowSnapshotContainer;
 
+import java.util.ArrayList;
 import java.util.List;
 
-public interface CheckstyleRule {
+public class SnapshotMetadataRule implements CheckstyleRule {
 
-    List<String> check(final FlowSnapshotContainer container, final String flowName, final CheckstyleRulesConfig.RuleConfig config);
+    @Override
+    public List<String> check(final FlowSnapshotContainer container, final String flowName, final RuleConfig config) {
+        final List<String> violations = new ArrayList<>();
+        if (container.getFlowSnapshot().getSnapshotMetadata() == null) {
+            violations.add("Flow snapshot metadata is missing");
+        }
+        return violations;
+    }
 
 }
