@@ -593,7 +593,7 @@
       "retryCount" : 10,
       "runDurationMillis" : 25,
       "scheduledState" : "ENABLED",
-      "schedulingPeriod" : "10 sec",
+      "schedulingPeriod" : "#{Scheduling Period}",
       "schedulingStrategy" : "TIMER_DRIVEN",
       "style" : { },
       "type" : "org.apache.nifi.processors.attributes.UpdateAttribute",
@@ -642,6 +642,12 @@
       }, {
         "description" : "",
         "name" : "should Have Default",
+        "provided" : false,
+        "sensitive" : false
+      }, {
+        "description" : "",
+        "name" : "Scheduling Period",
+		"value": "10 sec",
         "provided" : false,
         "sensitive" : false
       } ]

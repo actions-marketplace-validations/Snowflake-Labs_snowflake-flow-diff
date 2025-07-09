@@ -69,6 +69,10 @@ public class UnusedParameterRule implements CheckstyleRule {
                 if (isParameterReferenced(processor.getProperties(), parameterName, parser)) {
                     return true;
                 }
+                // a parameter can be referenced as a run schedule value
+                if (isParameterReferenced(processor.getSchedulingPeriod(), parameterName, parser)) {
+                    return true;
+                }
             }
         }
 
@@ -106,6 +110,21 @@ public class UnusedParameterRule implements CheckstyleRule {
                 if (parameterName.equals(reference.getParameterName())) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    private boolean isParameterReferenced(final String property, final String parameterName, final ParameterParser parser) {
+        if (property == null) {
+            return false;
+        }
+
+        final ParameterTokenList tokenList = parser.parseTokens(property);
+        for (final ParameterReference reference : tokenList.toReferenceList()) {
+            if (parameterName.equals(reference.getParameterName())) {
+                return true;
             }
         }
 
