@@ -21,6 +21,6 @@ rules:
       defaultParameters: "should Have Default"
     overrides:
       "t.*t":
-        defaultParameters: "addedParam, parameter2"
+        defaultParameters: "addedParam, parameter2, Scheduling Period"
       "anotherTest":
         defaultParameters: "parameter2"
