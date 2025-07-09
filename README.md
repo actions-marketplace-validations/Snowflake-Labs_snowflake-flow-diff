@@ -113,6 +113,8 @@ Available rules:
 - `concurrentTasks` to check the number of concurrent tasks and define an upper limit (parameter: `limit`, default value is 2)
 - `snapshotMetadata` to check that the flow snapshot metadata is present in the file
 - `emptyParameter` to check that no parameter is set to an empty string
+- `defaultParameters` to check parameters with a default value (parameter: `defaultParameters`, comma-separated list of parameter names having an expected default value)
+- `unusedParameter` to check if all specified parameters are used in the flow
 
 ## Example
 
