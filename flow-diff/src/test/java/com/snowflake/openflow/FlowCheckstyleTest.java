@@ -21,12 +21,14 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.snowflake.openflow.checkstyle.CheckstyleRulesConfig;
+import com.snowflake.openflow.checkstyle.CheckstyleRulesConfig.RuleConfig;
 import org.apache.nifi.registry.flow.FlowSnapshotContainer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,27 +49,37 @@ class FlowCheckstyleTest {
 
     @Test
     void testCustomLimit() throws IOException {
-        FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
-        CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_limit1.yaml");
-        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_limit1.yaml");
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
         assertEquals(2, violations.size());
         assertTrue(violations.stream().anyMatch(v -> v.contains("InvokeHTTP")));
         assertTrue(violations.stream().anyMatch(v -> v.contains("UpdateAttribute")));
     }
 
     @Test
+    void testConcurrentTasksComponentExclusion() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_component_exclusions_concurrent.yaml");
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(1, violations.size());
+        assertTrue(violations.stream().anyMatch(v -> v.contains("InvokeHTTP") && v.contains("1a59f65f-8b3a-3db9-982e-e0d334bd7e9c")));
+        assertTrue(violations.stream().noneMatch(v -> v.contains("2d8da922-fd1f-3519-9d54-6482dfd42c56")));
+    }
+
+    @Test
     void testOverride() throws IOException {
-        FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
-        CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_override.yaml");
-        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_override.yaml");
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
         assertEquals(0, violations.size());
     }
 
     @Test
     void testExclude() throws IOException {
-        FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
-        CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_exclude.yaml");
-        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_exclude.yaml");
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
         assertEquals(2, violations.size());
         assertTrue(violations.stream().anyMatch(v -> v.contains("Flow snapshot metadata is missing")));
         assertTrue(violations.stream().anyMatch(v -> v.contains("is set to empty string")));
@@ -75,8 +87,7 @@ class FlowCheckstyleTest {
 
     @Test
     void testEmptyParameters() throws IOException {
-        CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_emptyParameters.yaml");
-
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_emptyParameters.yaml");
         FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
         List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
         assertEquals(3, violations.size());
@@ -93,11 +104,101 @@ class FlowCheckstyleTest {
 
     @Test
     void testUnusedParameter() throws IOException {
-        FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
-        CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("unusedParameter"), null, null);
-        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("unusedParameter"), null, null);
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
         assertEquals(2, violations.size());
         assertTrue(violations.stream().anyMatch(v -> v.contains("Parameter named `newSensitiveParam` is not used anywhere in the flow")));
         assertTrue(violations.stream().anyMatch(v -> v.contains("Parameter named `secured` is not used anywhere in the flow")));
+    }
+
+    @Test
+    void testNoSelfLoop() throws IOException {
+        FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("noSelfLoop"), null, null);
+        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(1, violations.size());
+        assertTrue(violations.stream().anyMatch(v -> v.contains("Component named `UpdateAttribute` of type `PROCESSOR` has a self-loop connection")));
+    }
+
+    @Test
+    void testNoSelfLoopComponentExclusion() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_component_exclusions_selfloop.yaml");
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(0, violations.size());
+    }
+
+    @Test
+    void testEnforcePrioritizerNoArgument() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("enforcePrioritizer"), null, null);
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(0, violations.size());
+    }
+
+    @Test
+    void testEnforcePrioritizerWithGlobalParameter() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final RuleConfig ruleConfig = new CheckstyleRulesConfig.RuleConfig(Map.of("prioritizers", "org.apache.nifi.prioritizer.FirstInFirstOutPrioritizer"), null, null, null);
+        CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("enforcePrioritizer"), null, Map.of("enforcePrioritizer", ruleConfig));
+        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(3, violations.size());
+    }
+
+    @Test
+    void testEnforcePrioritizerComponentExclusion() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_component_exclusions_prioritizer.yaml");
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(2, violations.size());
+        assertTrue(violations.stream().noneMatch(v -> v.contains("a760d0b0-51e7-34af-922a-47366dfb2892")));
+    }
+
+    @Test
+    void testEnforcePrioritizerWithOverrideParameter() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+        final RuleConfig ruleConfig = new CheckstyleRulesConfig.RuleConfig(null, Map.of(".*", Map.of("prioritizers", "org.apache.nifi.prioritizer.FirstInFirstOutPrioritizer")), null, null);
+        CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("enforcePrioritizer"), null, Map.of("enforcePrioritizer", ruleConfig));
+        List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+        assertEquals(3, violations.size());
+    }
+
+    @Test
+    void testBackpressureThresholdViolations() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+
+        container.getFlowSnapshot().getFlowContents().getConnections().iterator().next().setBackPressureDataSizeThreshold("0 B");
+        container.getFlowSnapshot().getFlowContents().getConnections().iterator().next().setBackPressureObjectThreshold(0L);
+
+        final CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("backpressureThreshold"), null, null);
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+
+        assertEquals(2, violations.size());
+        assertTrue(violations.stream().anyMatch(v -> v.contains("data size backpressure threshold")));
+        assertTrue(violations.stream().anyMatch(v -> v.contains("object count backpressure threshold")));
+    }
+
+    @Test
+    void testBackpressureThresholdComponentExclusion() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+
+        container.getFlowSnapshot().getFlowContents().getConnections().iterator().next().setBackPressureDataSizeThreshold("0 B");
+        container.getFlowSnapshot().getFlowContents().getConnections().iterator().next().setBackPressureObjectThreshold(0L);
+
+        final CheckstyleRulesConfig config = CheckstyleRulesConfig.fromFile("src/test/resources/checkstyle_component_exclusions_backpressure.yaml");
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+
+        assertEquals(0, violations.size());
+    }
+
+    @Test
+    void testBackpressureThresholdNoViolationsWhenPositive() throws IOException {
+        final FlowSnapshotContainer container = FlowDiff.getFlowContainer("src/test/resources/flow_v6_parameter_value.json", jsonFactory);
+
+        final CheckstyleRulesConfig config = new CheckstyleRulesConfig(List.of("backpressureThreshold"), null, null);
+        final List<String> violations = FlowCheckstyle.getCheckstyleViolations(container, container.getFlowSnapshot().getFlow().getName(), config);
+
+        assertEquals(0, violations.size());
     }
 }

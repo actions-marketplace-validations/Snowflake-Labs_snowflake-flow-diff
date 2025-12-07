@@ -29,6 +29,7 @@ import org.apache.nifi.flow.VersionedComponent;
 import org.apache.nifi.flow.VersionedConfigurableExtension;
 import org.apache.nifi.flow.VersionedConnection;
 import org.apache.nifi.flow.VersionedControllerService;
+import org.apache.nifi.flow.VersionedFlowCoordinates;
 import org.apache.nifi.flow.VersionedLabel;
 import org.apache.nifi.flow.VersionedParameter;
 import org.apache.nifi.flow.VersionedParameterContext;
@@ -53,6 +54,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -60,12 +62,21 @@ import java.util.function.Function;
 
 public class FlowDiff {
 
+    private static final int RETURN_SUCCESS = 0;
+    private static final int RETURN_FAILURE = 1;
+    private static final int RETURN_CHECKSTYLE_VIOLATIONS = 2;
+
     private static String flowName;
     private static Map<String, VersionedParameterContext> parameterContexts;
     private static Map<String, VersionedProcessGroup> processGroups;
     private static List<String> checkstyleViolations;
 
     public static void main(String[] args) throws IOException {
+        final int exitCode = run(args);
+        System.exit(exitCode);
+    }
+
+    static int run(String[] args) throws IOException {
 
         final List<String> pathsA = List.of(args[0].split(",")).stream().map(String::trim).toList();
         final List<String> pathsB = List.of(args[1].split(",")).stream().map(String::trim).toList();
@@ -74,6 +85,9 @@ public class FlowDiff {
         final CheckstyleRulesConfig rulesConfig = args.length > 3 && args[3] != null && !args[3].isEmpty()
                 ? CheckstyleRulesConfig.fromFile(args[3])
                 : null;
+        final boolean failOnCheckstyleViolations = args.length > 4 && args[4] != null && !args[4].isEmpty()
+                ? Boolean.parseBoolean(args[4])
+                : false;
 
         System.out.println("> [!NOTE]");
         System.out.println("> This GitHub Action is created and maintained by [Snowflake](https://www.snowflake.com/).");
@@ -81,28 +95,36 @@ public class FlowDiff {
 
         if (pathsA.size() != pathsB.size()) {
             System.out.println("The action didn't properly identify the files to compare. Please check the input files.");
-            return;
+            return RETURN_FAILURE;
         } else {
             System.out.println("Identified " + pathsA.size() + " changed flows in this Pull Request.");
         }
 
-        for (int i = 0; i < pathsA.size(); i++) {
+        boolean hasBlockingCheckstyleViolations = false;
 
+        for (int i = 0; i < pathsA.size(); i++) {
             System.out.println("");
 
             flowName = "";
             parameterContexts = new HashMap<>();
             processGroups = new HashMap<>();
 
-            executeFlowDiffForOneFlow(pathsA.get(i), pathsB.get(i), checkstyleEnabled, rulesConfig);
+            final boolean flowHasCheckstyleViolations = executeFlowDiffForOneFlow(pathsA.get(i), pathsB.get(i), checkstyleEnabled, rulesConfig);
+            hasBlockingCheckstyleViolations = hasBlockingCheckstyleViolations || flowHasCheckstyleViolations;
         }
 
+        if (checkstyleEnabled && failOnCheckstyleViolations && hasBlockingCheckstyleViolations) {
+            return RETURN_CHECKSTYLE_VIOLATIONS;
+        }
+
+        return RETURN_SUCCESS;
     }
 
-    private static void executeFlowDiffForOneFlow(final String pathA, final String pathB,
+    private static boolean executeFlowDiffForOneFlow(final String pathA, final String pathB,
             final boolean checkstyleEnabled, final CheckstyleRulesConfig rulesConfig) throws IOException {
         final Set<FlowDifference> diffs = getDiff(pathA, pathB, checkstyleEnabled, rulesConfig);
         final Set<String> bundleChanges = new HashSet<>();
+        boolean flowHasCheckstyleViolations = false;
 
         System.out.println("### Executing Snowflake Flow Diff for flow: " + flowName);
 
@@ -113,9 +135,12 @@ public class FlowDiff {
                 System.out.println("> - " + violation);
             }
             System.out.println("");
+            flowHasCheckstyleViolations = true;
+        } else if (checkstyleEnabled && (checkstyleViolations == null || checkstyleViolations.isEmpty())) {
+            System.out.println("#### No Checkstyle Violations found");
         }
 
-        if (!diffs.isEmpty()) {
+        if (diffs != null && !diffs.isEmpty()) {
 
             System.out.println("#### Flow Changes");
 
@@ -261,10 +286,6 @@ public class FlowDiff {
                             + "` has been added to the process group `" + pg.getName() + "`");
                     break;
                 }
-                case POSITION_CHANGED: {
-                    System.out.println("- A " + printComponent(diff.getComponentA()) + " has been moved to another position");
-                    break;
-                }
                 case SCHEDULING_STRATEGY_CHANGED: {
                     System.out.println("- In " + printComponent(diff.getComponentA())
                             + ", the Scheduling Strategy changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
@@ -327,9 +348,19 @@ public class FlowDiff {
                     final String paramKey = diff.getFieldName().get();
                     final VersionedParameterContext pc = (VersionedParameterContext) diff.getComponentB();
                     final VersionedParameter param = pc.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
+
+                    final String description;
+                    if (isEmpty(param.getDescription())) {
+                        description = "";
+                    } else if (isMultiline(param.getDescription())) {
+                        description = " with the description\n```\n" + param.getDescription() + "\n```";
+                    } else {
+                        description = " with the description `" + param.getDescription() + "`";
+                    }
+
                     System.out.println("- In the Parameter Context `" + pc.getName() + "` a parameter has been added: `"
                             + paramKey + "` = `" + (param.isSensitive() ? "<Sensitive Value>" : param.getValue()) + "`"
-                            + (isEmpty(param.getDescription()) ? "" : " with the description `" + param.getDescription() + "`"));
+                            + description);
                     break;
                 }
                 case PARAMETER_REMOVED: {
@@ -358,13 +389,6 @@ public class FlowDiff {
                     System.out.println("- In the Parameter Context `" + pc.getName()
                             + "`, the list of inherited parameter contexts changed from `"
                             + diff.getValueA() + "`" + " to `" + diff.getValueB() + "`");
-                    break;
-                case BENDPOINTS_CHANGED:
-                    final VersionedConnection connection = (VersionedConnection) diff.getComponentA();
-                    System.out.println("- The bending points for the connection `"
-                            + (isEmpty(connection.getName()) ? connection.getSelectedRelationships().toString() : connection.getName())
-                            + "` from `" + connection.getSource().getName() + "` to `" + connection.getDestination().getName()
-                            + "` have been changed");
                     break;
                 case PARTITIONING_ATTRIBUTE_CHANGED:
                     final VersionedConnection pacConnection = (VersionedConnection) diff.getComponentA();
@@ -422,15 +446,30 @@ public class FlowDiff {
                             + printFromTo(diff.getValueA().toString(), diff.getValueB().toString()));
                     break;
                 case EXECUTION_MODE_CHANGED:
-                    System.out.println("- In " + printComponent(diff.getComponentA())
+                    System.out.println("- In " + printComponent(diff.getComponentB())
                             + ", the Execution Mode changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                     break;
                 case PROPERTY_SENSITIVITY_CHANGED:
                     System.out.println("- In " + printComponent(diff.getComponentA()) + ", the sensitivity of the property `"
                             + diff.getFieldName().get() + "` changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                     break;
-                case SIZE_CHANGED, STYLE_CHANGED:
+                case SIZE_CHANGED, STYLE_CHANGED, POSITION_CHANGED, BENDPOINTS_CHANGED, ZINDEX_CHANGED:
                     // no need to print these, they are not relevant for the user
+                    break;
+                case FLOWFILE_CONCURRENCY_CHANGED:
+                    System.out.println("- In " + printComponent(diff.getComponentB())
+                            + ", the FlowFile Concurrency changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
+                    break;
+                case FLOWFILE_OUTBOUND_POLICY_CHANGED:
+                    System.out.println("- In " + printComponent(diff.getComponentB())
+                            + ", the FlowFile Outbound Policy changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
+                    break;
+                case VERSIONED_FLOW_COORDINATES_CHANGED:
+                    final VersionedProcessGroup pg = (VersionedProcessGroup) diff.getComponentA();
+                    final VersionedFlowCoordinates vfcBefore = (VersionedFlowCoordinates) diff.getValueA();
+                    final VersionedFlowCoordinates vfcAfter = (VersionedFlowCoordinates) diff.getValueB();
+                    System.out.println("- The Versioned Flow Coordinates for the Process Group `" + pg.getName() + "` have changed: "
+                            + printVFCChanges(vfcBefore, vfcAfter));
                     break;
 
                 default:
@@ -451,14 +490,19 @@ public class FlowDiff {
                     System.out.println(bundleChange);
                 }
             }
+        } else if (diffs == null) {
+            System.out.println("#### No changes as this is the first version of the flow");
+        } else {
+            System.out.println("#### No relevant changes found in the flow");
         }
+
+        return flowHasCheckstyleViolations;
     }
 
     public static Set<FlowDifference> getDiff(final String pathA, final String pathB,
             final boolean checkstyleEnabled, final CheckstyleRulesConfig rulesConfig) throws IOException {
         final ObjectMapper objectMapper = new ObjectMapper();
-        objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        objectMapper.setDefaultPropertyInclusion(JsonInclude.Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL));
+        objectMapper.setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
         final JsonFactory factory = new JsonFactory(objectMapper);
@@ -486,6 +530,8 @@ public class FlowDiff {
             plainFlowName = snapshotB.getFlowSnapshot().getFlow().getName();
         }
 
+        flowName = plainFlowName.isEmpty() ? "Unnamed Flow" : "`" + plainFlowName + "`";
+
         if (checkstyleEnabled) {
             checkstyleViolations = FlowCheckstyle.getCheckstyleViolations(snapshotB, plainFlowName, rulesConfig);
         }
@@ -493,7 +539,7 @@ public class FlowDiff {
         if (noOriginalFlow) {
             // we have executed checkstyle if enabled
             // no original flow, so we are not comparing with anything
-            return Collections.emptySet();
+            return null;
         }
 
         // identifier is null for parameter contexts, and we know that names are unique so setting name as id
@@ -528,7 +574,6 @@ public class FlowDiff {
                 FlowComparatorVersionedStrategy.DEEP
             );
 
-        flowName = plainFlowName.isEmpty() ? "Unnamed Flow" : "`" + plainFlowName + "`";
         parameterContexts = snapshotB.getFlowSnapshot().getParameterContexts();
 
         final SortedSet<FlowDifference> sortedDiffs = new TreeSet(new Comparator<FlowDifference>() {
@@ -644,6 +689,27 @@ public class FlowDiff {
         }
 
         System.out.println(message);
+    }
+
+    static String printVFCChanges(VersionedFlowCoordinates vfcBefore, VersionedFlowCoordinates vfcAfter) {
+        List<String> changes = new ArrayList<>();
+        processVFCChange(vfcBefore.getBranch(), vfcAfter.getBranch(), "branch", changes);
+        processVFCChange(vfcBefore.getBucketId(), vfcAfter.getBucketId(), "bucket", changes);
+        processVFCChange(vfcBefore.getFlowId(), vfcAfter.getFlowId(), "flow ID", changes);
+        processVFCChange(vfcBefore.getVersion(), vfcAfter.getVersion(), "version", changes);
+        processVFCChange(vfcBefore.getRegistryId(), vfcAfter.getRegistryId(), "registry ID", changes);
+        processVFCChange(vfcBefore.getStorageLocation(), vfcAfter.getStorageLocation(), "storage location", changes);
+        return String.join(", ", changes);
+    }
+
+    static void processVFCChange(String valueA, String valueB, String elementName, List<String> changes) {
+        if (Objects.equals(valueA, valueB)) {
+            if (valueA != null) {
+                changes.add(elementName + " unchanged (`" + valueA + "`)");
+            }
+        } else {
+            changes.add(elementName + " changed from `" + valueA + "` to `" + valueB + "`");
+        }
     }
 
     static String printFromTo(final String from, final String to) {
