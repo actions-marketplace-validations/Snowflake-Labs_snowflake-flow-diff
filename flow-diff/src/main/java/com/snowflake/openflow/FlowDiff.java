@@ -22,6 +22,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.snowflake.openflow.checkstyle.CheckstyleRulesConfig;
+import com.snowflake.openflow.github.GitHubClient;
 import org.apache.nifi.flow.Bundle;
 import org.apache.nifi.flow.ComponentType;
 import org.apache.nifi.flow.ConnectableComponent;
@@ -45,8 +46,11 @@ import org.apache.nifi.registry.flow.diff.FlowDifference;
 import org.apache.nifi.registry.flow.diff.StandardComparableDataFlow;
 import org.apache.nifi.registry.flow.diff.StandardFlowComparator;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -77,47 +81,92 @@ public class FlowDiff {
     }
 
     static int run(String[] args) throws IOException {
+        // Arguments match the order from action.yml:
+        // args[0] = flowA
+        // args[1] = flowB
+        // args[2] = token
+        // args[3] = repository
+        // args[4] = issuenumber
+        // args[5] = checkstyle
+        // args[6] = checkstyle-rules
+        // args[7] = checkstyle-fail
 
         final List<String> pathsA = List.of(args[0].split(",")).stream().map(String::trim).toList();
         final List<String> pathsB = List.of(args[1].split(",")).stream().map(String::trim).toList();
 
-        final boolean checkstyleEnabled = Boolean.parseBoolean(args[2]);
-        final CheckstyleRulesConfig rulesConfig = args.length > 3 && args[3] != null && !args[3].isEmpty()
-                ? CheckstyleRulesConfig.fromFile(args[3])
+        // GitHub API parameters (optional - if not provided, output goes to stdout only)
+        final String githubToken = args.length > 2 && args[2] != null && !args[2].isEmpty() ? args[2] : null;
+        final String githubRepository = args.length > 3 && args[3] != null && !args[3].isEmpty() ? args[3] : null;
+        final String githubIssueNumber = args.length > 4 && args[4] != null && !args[4].isEmpty() ? args[4] : null;
+
+        final boolean checkstyleEnabled = args.length > 5 && args[5] != null && !args[5].isEmpty()
+                ? Boolean.parseBoolean(args[5])
+                : false;
+        final CheckstyleRulesConfig rulesConfig = args.length > 6 && args[6] != null && !args[6].isEmpty()
+                ? CheckstyleRulesConfig.fromFile(args[6])
                 : null;
-        final boolean failOnCheckstyleViolations = args.length > 4 && args[4] != null && !args[4].isEmpty()
-                ? Boolean.parseBoolean(args[4])
+        final boolean failOnCheckstyleViolations = args.length > 7 && args[7] != null && !args[7].isEmpty()
+                ? Boolean.parseBoolean(args[7])
                 : false;
 
-        System.out.println("> [!NOTE]");
-        System.out.println("> This GitHub Action is created and maintained by [Snowflake](https://www.snowflake.com/).");
-        System.out.println("");
+        // Capture output to a string if we need to post to GitHub
+        final ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
+        final PrintStream originalOut = System.out;
+        final PrintStream captureStream = new PrintStream(outputCapture, true, StandardCharsets.UTF_8);
 
-        if (pathsA.size() != pathsB.size()) {
-            System.out.println("The action didn't properly identify the files to compare. Please check the input files.");
-            return RETURN_FAILURE;
-        } else {
-            System.out.println("Identified " + pathsA.size() + " changed flows in this Pull Request.");
+        if (githubToken != null && githubRepository != null && githubIssueNumber != null) {
+            System.setOut(captureStream);
         }
 
-        boolean hasBlockingCheckstyleViolations = false;
-
-        for (int i = 0; i < pathsA.size(); i++) {
+        try {
+            System.out.println("> [!NOTE]");
+            System.out.println("> This GitHub Action is created and maintained by [Snowflake](https://www.snowflake.com/).");
             System.out.println("");
 
-            flowName = "";
-            parameterContexts = new HashMap<>();
-            processGroups = new HashMap<>();
+            if (pathsA.size() != pathsB.size()) {
+                System.out.println("The action didn't properly identify the files to compare. Please check the input files.");
+                return RETURN_FAILURE;
+            } else {
+                System.out.println("Identified " + pathsA.size() + " changed flows in this Pull Request.");
+            }
 
-            final boolean flowHasCheckstyleViolations = executeFlowDiffForOneFlow(pathsA.get(i), pathsB.get(i), checkstyleEnabled, rulesConfig);
-            hasBlockingCheckstyleViolations = hasBlockingCheckstyleViolations || flowHasCheckstyleViolations;
+            boolean hasBlockingCheckstyleViolations = false;
+
+            for (int i = 0; i < pathsA.size(); i++) {
+                System.out.println("");
+
+                flowName = "";
+                parameterContexts = new HashMap<>();
+                processGroups = new HashMap<>();
+
+                final boolean flowHasCheckstyleViolations = executeFlowDiffForOneFlow(pathsA.get(i), pathsB.get(i), checkstyleEnabled, rulesConfig);
+                hasBlockingCheckstyleViolations = hasBlockingCheckstyleViolations || flowHasCheckstyleViolations;
+            }
+
+            // Post to GitHub if credentials are provided
+            if (githubToken != null && githubRepository != null && githubIssueNumber != null) {
+                System.setOut(originalOut);
+                final String output = outputCapture.toString(StandardCharsets.UTF_8);
+
+                // Also print to stdout for logging
+                System.out.println(output);
+
+                // Post the new comment first, then delete old ones (safer: if posting fails, old comments remain)
+                final GitHubClient gitHubClient = new GitHubClient(githubToken, githubRepository, githubIssueNumber);
+                final boolean postSuccess = gitHubClient.postComment(output);
+                if (postSuccess) {
+                    gitHubClient.deletePreviousComments();
+                }
+            }
+
+            if (checkstyleEnabled && failOnCheckstyleViolations && hasBlockingCheckstyleViolations) {
+                return RETURN_CHECKSTYLE_VIOLATIONS;
+            }
+
+            return RETURN_SUCCESS;
+        } finally {
+            System.setOut(originalOut);
         }
-
-        if (checkstyleEnabled && failOnCheckstyleViolations && hasBlockingCheckstyleViolations) {
-            return RETURN_CHECKSTYLE_VIOLATIONS;
-        }
-
-        return RETURN_SUCCESS;
     }
 
     private static boolean executeFlowDiffForOneFlow(final String pathA, final String pathB,
