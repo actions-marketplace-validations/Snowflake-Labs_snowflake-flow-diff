@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Snowflake Inc.
+ * Copyright 2026 Snowflake Inc.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,6 +18,7 @@ package com.snowflake.openflow;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,10 +53,10 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -74,6 +75,7 @@ public class FlowDiff {
     private static Map<String, VersionedParameterContext> parameterContexts;
     private static Map<String, VersionedProcessGroup> processGroups;
     private static List<String> checkstyleViolations;
+    private static boolean jsonParseError;
 
     public static void main(String[] args) throws IOException {
         final int exitCode = run(args);
@@ -90,6 +92,7 @@ public class FlowDiff {
         // args[5] = checkstyle
         // args[6] = checkstyle-rules
         // args[7] = checkstyle-fail
+        // args[8] = api-url
 
         final List<String> pathsA = List.of(args[0].split(",")).stream().map(String::trim).toList();
         final List<String> pathsB = List.of(args[1].split(",")).stream().map(String::trim).toList();
@@ -108,6 +111,7 @@ public class FlowDiff {
         final boolean failOnCheckstyleViolations = args.length > 7 && args[7] != null && !args[7].isEmpty()
                 ? Boolean.parseBoolean(args[7])
                 : false;
+        final String githubApiUrl = args.length > 8 && args[8] != null && !args[8].isEmpty() ? args[8] : null;
 
         // Capture output to a string if we need to post to GitHub
         final ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
@@ -131,6 +135,7 @@ public class FlowDiff {
             }
 
             boolean hasBlockingCheckstyleViolations = false;
+            boolean hasParseErrors = false;
 
             for (int i = 0; i < pathsA.size(); i++) {
                 System.out.println("");
@@ -138,9 +143,11 @@ public class FlowDiff {
                 flowName = "";
                 parameterContexts = new HashMap<>();
                 processGroups = new HashMap<>();
+                jsonParseError = false;
 
                 final boolean flowHasCheckstyleViolations = executeFlowDiffForOneFlow(pathsA.get(i), pathsB.get(i), checkstyleEnabled, rulesConfig);
                 hasBlockingCheckstyleViolations = hasBlockingCheckstyleViolations || flowHasCheckstyleViolations;
+                hasParseErrors = hasParseErrors || jsonParseError;
             }
 
             // Post to GitHub if credentials are provided
@@ -152,11 +159,15 @@ public class FlowDiff {
                 System.out.println(output);
 
                 // Post the new comment first, then delete old ones (safer: if posting fails, old comments remain)
-                final GitHubClient gitHubClient = new GitHubClient(githubToken, githubRepository, githubIssueNumber);
+                final GitHubClient gitHubClient = new GitHubClient(githubToken, githubRepository, githubIssueNumber, githubApiUrl);
                 final boolean postSuccess = gitHubClient.postComment(output);
                 if (postSuccess) {
                     gitHubClient.deletePreviousComments();
                 }
+            }
+
+            if (hasParseErrors) {
+                return RETURN_FAILURE;
             }
 
             if (checkstyleEnabled && failOnCheckstyleViolations && hasBlockingCheckstyleViolations) {
@@ -171,7 +182,22 @@ public class FlowDiff {
 
     private static boolean executeFlowDiffForOneFlow(final String pathA, final String pathB,
             final boolean checkstyleEnabled, final CheckstyleRulesConfig rulesConfig) throws IOException {
-        final Set<FlowDifference> diffs = getDiff(pathA, pathB, checkstyleEnabled, rulesConfig);
+        final Set<FlowDifference> diffs;
+        try {
+            diffs = getDiff(pathA, pathB, checkstyleEnabled, rulesConfig);
+        } catch (JsonParseException e) {
+            jsonParseError = true;
+            System.out.println("### Executing Snowflake Flow Diff for flow: `" + pathB + "`");
+            System.out.println("");
+            System.out.println("> [!CAUTION]");
+            System.out.println("> " + e.getOriginalMessage());
+            if (e.getLocation() != null) {
+                System.out.println("> Line " + e.getLocation().getLineNr()
+                        + ", column " + e.getLocation().getColumnNr());
+            }
+            System.out.println("");
+            return false;
+        }
         final Set<String> bundleChanges = new HashSet<>();
         boolean flowHasCheckstyleViolations = false;
 
@@ -193,7 +219,41 @@ public class FlowDiff {
 
             System.out.println("#### Flow Changes");
 
+            // Phase 1: collect bundle changes and group remaining diffs by process group path
+            final Map<String, List<FlowDifference>> groupedDiffs = new LinkedHashMap<>();
             for (FlowDifference diff : diffs) {
+                switch (diff.getDifferenceType()) {
+                case BUNDLE_CHANGED:
+                    Bundle before = (Bundle) diff.getValueA();
+                    Bundle after = (Bundle) diff.getValueB();
+                    bundleChanges.add("- The bundle `"
+                            + before.getGroup() + ":" + before.getArtifact()
+                            + "` has been changed from version "
+                            + "`" + before.getVersion() + "` to version `" + after.getVersion() + "`");
+                    break;
+                case SIZE_CHANGED, STYLE_CHANGED, POSITION_CHANGED, BENDPOINTS_CHANGED, ZINDEX_CHANGED:
+                    // no need to print these, they are not relevant for the user
+                    break;
+                default:
+                    groupedDiffs.computeIfAbsent(getGroupPathForDiff(diff), k -> new ArrayList<>()).add(diff);
+                }
+            }
+
+            // Phase 2: print each group with a header, parameter contexts section last
+            final List<String> sortedPaths = new ArrayList<>(groupedDiffs.keySet());
+            sortedPaths.sort((a, b) -> {
+                if (a.equals(PARAMETER_CONTEXTS_SECTION)) return 1;
+                if (b.equals(PARAMETER_CONTEXTS_SECTION)) return -1;
+                return a.compareTo(b);
+            });
+
+            for (final String groupPath : sortedPaths) {
+                final List<FlowDifference> groupDiffs = groupedDiffs.get(groupPath);
+                final int count = groupDiffs.size();
+                System.out.println("");
+                System.out.println("**`" + groupPath + "`** \u2014 " + count + (count == 1 ? " change" : " changes"));
+
+                for (FlowDifference diff : groupDiffs) {
 
                 switch (diff.getDifferenceType()) {
                 case COMPONENT_ADDED: {
@@ -209,9 +269,8 @@ public class FlowDiff {
                         printConfigurableExtensionProperties(proc);
                     } else if (diff.getComponentB().getComponentType().equals(ComponentType.CONTROLLER_SERVICE)) {
                         final VersionedControllerService cs = (VersionedControllerService) diff.getComponentB();
-                        final String pgName = processGroups.get(cs.getGroupIdentifier()).getName();
                         System.out.println("- A " + printComponent(diff.getComponentB())
-                                + " has been added in Process Group `" + pgName + "` with the below properties:");
+                                + " has been added with the below properties:");
                         printConfigurableExtensionProperties(cs);
                     } else if (diff.getComponentB().getComponentType().equals(ComponentType.LABEL)) {
                         final VersionedLabel label = (VersionedLabel) diff.getComponentB();
@@ -340,14 +399,6 @@ public class FlowDiff {
                             + ", the Scheduling Strategy changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                     break;
                 }
-                case BUNDLE_CHANGED:
-                    Bundle before = (Bundle) diff.getValueA();
-                    Bundle after = (Bundle) diff.getValueB();
-                    bundleChanges.add("- The bundle `"
-                            + before.getGroup() + ":" + before.getArtifact()
-                            + "` has been changed from version "
-                            + "`" + before.getVersion() + "` to version `" + after.getVersion() + "`");
-                    break;
                 case NAME_CHANGED: {
                     System.out.println("- A " + printComponent(diff.getComponentA())
                             + " has been renamed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
@@ -396,7 +447,12 @@ public class FlowDiff {
                 case PARAMETER_ADDED: {
                     final String paramKey = diff.getFieldName().get();
                     final VersionedParameterContext pc = (VersionedParameterContext) diff.getComponentB();
-                    final VersionedParameter param = pc.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
+                    final VersionedParameter param = pc.getParameters() == null ? null
+                            : pc.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().orElse(null);
+                    if (param == null) {
+                        System.out.println("- In the Parameter Context `" + pc.getName() + "` a parameter has been added: `" + paramKey + "`");
+                        break;
+                    }
 
                     final String description;
                     if (isEmpty(param.getDescription())) {
@@ -425,8 +481,15 @@ public class FlowDiff {
                     final String paramKey = diff.getFieldName().get();
                     final VersionedParameterContext pcBefore = (VersionedParameterContext) diff.getComponentA();
                     final VersionedParameterContext pcAfter = (VersionedParameterContext) diff.getComponentB();
-                    final VersionedParameter paramBefore = pcBefore.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
-                    final VersionedParameter paramAfter = pcAfter.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().get();
+                    final VersionedParameter paramBefore = pcBefore.getParameters() == null ? null
+                            : pcBefore.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().orElse(null);
+                    final VersionedParameter paramAfter = pcAfter.getParameters() == null ? null
+                            : pcAfter.getParameters().stream().filter(p -> p.getName().equals(paramKey)).findFirst().orElse(null);
+                    if (paramBefore == null || paramAfter == null) {
+                        System.out.println("- In the Parameter Context `" + pcAfter.getName()
+                                + "`, the value of the parameter `" + paramKey + "` has changed");
+                        break;
+                    }
                     System.out.println("- In the Parameter Context `" + pcAfter.getName()
                             + "`, the value of the parameter `" + paramKey + "` has changed from "
                             + printFromTo(paramBefore.isSensitive() ? "<Sensitive Value>" : paramBefore.getValue(),
@@ -502,9 +565,6 @@ public class FlowDiff {
                     System.out.println("- In " + printComponent(diff.getComponentA()) + ", the sensitivity of the property `"
                             + diff.getFieldName().get() + "` changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
                     break;
-                case SIZE_CHANGED, STYLE_CHANGED, POSITION_CHANGED, BENDPOINTS_CHANGED, ZINDEX_CHANGED:
-                    // no need to print these, they are not relevant for the user
-                    break;
                 case FLOWFILE_CONCURRENCY_CHANGED:
                     System.out.println("- In " + printComponent(diff.getComponentB())
                             + ", the FlowFile Concurrency changed from `" + diff.getValueA() + "` to `" + diff.getValueB() + "`");
@@ -530,7 +590,8 @@ public class FlowDiff {
                     System.out.println("  - " + diff.getFieldName());
                     break;
                 }
-            }
+                } // end inner diff loop
+            } // end group loop
 
             if (bundleChanges.size() > 0) {
                 System.out.println("");
@@ -550,6 +611,9 @@ public class FlowDiff {
 
     public static Set<FlowDifference> getDiff(final String pathA, final String pathB,
             final boolean checkstyleEnabled, final CheckstyleRulesConfig rulesConfig) throws IOException {
+        validateNoDuplicateKeys(pathA);
+        validateNoDuplicateKeys(pathB);
+
         final ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -560,14 +624,25 @@ public class FlowDiff {
         FlowSnapshotContainer snapshotA = null;
         try {
             snapshotA = getFlowContainer(pathA, factory);
-        } catch (Exception e) {
+        } catch (IOException e) {
             // no original flow - meaning that the Github Action is executed against the
             // first version of the flow
             noOriginalFlow = true;
         }
         final FlowSnapshotContainer snapshotB = getFlowContainer(pathB, factory);
 
+        if (snapshotA != null) {
+            sanitizeProcessGroup(snapshotA.getFlowSnapshot().getFlowContents());
+        }
+        sanitizeProcessGroup(snapshotB.getFlowSnapshot().getFlowContents());
+
         processGroups = new HashMap<>();
+        // Register A's groups first so B can overwrite — B takes display-name priority
+        if (snapshotA != null) {
+            final VersionedProcessGroup rootPGA = snapshotA.getFlowSnapshot().getFlowContents();
+            processGroups.put(rootPGA.getIdentifier(), rootPGA);
+            registerProcessGroups(rootPGA);
+        }
         VersionedProcessGroup rootPG = snapshotB.getFlowSnapshot().getFlowContents();
         processGroups.put(rootPG.getIdentifier(), rootPG);
         registerProcessGroups(rootPG);
@@ -616,7 +691,6 @@ public class FlowDiff {
                         null,
                         null
                         ),
-                Collections.emptySet(),
                 new ConciseEvolvingDifferenceDescriptor(),
                 Function.identity(),
                 VersionedComponent::getIdentifier,
@@ -638,11 +712,81 @@ public class FlowDiff {
         return sortedDiffs;
     }
 
-    private static void registerProcessGroups(VersionedProcessGroup rootPG) {
-        Set<VersionedProcessGroup> childPGs = rootPG.getProcessGroups();
-        for (VersionedProcessGroup pg : childPGs) {
+    private static void registerProcessGroups(final VersionedProcessGroup rootPG) {
+        final Set<VersionedProcessGroup> childPGs = rootPG.getProcessGroups() != null ? rootPG.getProcessGroups() : Set.of();
+        for (final VersionedProcessGroup pg : childPGs) {
             processGroups.put(pg.getIdentifier(), pg);
             registerProcessGroups(pg);
+        }
+    }
+
+    static final String PARAMETER_CONTEXTS_SECTION = "(Parameter Contexts)";
+
+    static String buildProcessGroupPath(final String startGroupId) {
+        if (startGroupId == null) {
+            return PARAMETER_CONTEXTS_SECTION;
+        }
+        final List<String> pathParts = new ArrayList<>();
+        String currentId = startGroupId;
+        final Set<String> visited = new HashSet<>();
+        while (currentId != null && !visited.contains(currentId)) {
+            visited.add(currentId);
+            final VersionedProcessGroup pg = processGroups.get(currentId);
+            if (pg == null) {
+                pathParts.add(0, currentId);
+                break;
+            }
+            final String name = pg.getName();
+            pathParts.add(0, (name != null && !name.isEmpty()) ? name : currentId);
+            currentId = pg.getGroupIdentifier();
+        }
+        return pathParts.isEmpty() ? startGroupId : String.join(" > ", pathParts);
+    }
+
+    static String getGroupPathForDiff(final FlowDifference diff) {
+        final VersionedComponent component = diff.getComponentA() != null ? diff.getComponentA() : diff.getComponentB();
+        if (component == null) {
+            return PARAMETER_CONTEXTS_SECTION;
+        }
+        if (component instanceof VersionedParameterContext) {
+            return PARAMETER_CONTEXTS_SECTION;
+        }
+        final String groupId = component.getGroupIdentifier();
+        // A process group is placed under its own path; other components are placed under their containing group's path.
+        // groupId is null when the component is the root process group itself.
+        if (component instanceof VersionedProcessGroup) {
+            return buildProcessGroupPath(component.getIdentifier());
+        }
+        return groupId != null ? buildProcessGroupPath(groupId) : buildProcessGroupPath(component.getIdentifier());
+    }
+
+    private static void sanitizeProcessGroup(final VersionedProcessGroup group) {
+        if (group == null) {
+            return;
+        }
+        if (group.getProcessors() != null) {
+            for (final VersionedProcessor processor : group.getProcessors()) {
+                sanitizeConfigurableExtension(processor);
+            }
+        }
+        if (group.getControllerServices() != null) {
+            for (final VersionedControllerService service : group.getControllerServices()) {
+                sanitizeConfigurableExtension(service);
+            }
+        }
+        if (group.getProcessGroups() != null) {
+            for (final VersionedProcessGroup child : group.getProcessGroups()) {
+                sanitizeProcessGroup(child);
+            }
+        }
+    }
+
+    private static void sanitizeConfigurableExtension(final VersionedConfigurableExtension extension) {
+        if (extension.getProperties() == null) {
+            extension.setProperties(new LinkedHashMap<>());
+        }
+        if (extension.getPropertyDescriptors() == null) {
+            extension.setPropertyDescriptors(new LinkedHashMap<>());
         }
     }
 
@@ -651,6 +795,24 @@ public class FlowDiff {
         try (final JsonParser parser = factory.createParser(snapshotFile)) {
             final RegisteredFlowSnapshot snapshot = parser.readValueAs(RegisteredFlowSnapshot.class);
             return new FlowSnapshotContainer(snapshot);
+        }
+    }
+
+    static void validateNoDuplicateKeys(final String path) throws IOException {
+        final File file = new File(path);
+        if (!file.exists()) {
+            return;
+        }
+        final JsonFactory strictFactory = new JsonFactory();
+        strictFactory.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+        try (final JsonParser parser = strictFactory.createParser(file)) {
+            while (parser.nextToken() != null) {}
+        } catch (JsonParseException e) {
+            throw new JsonParseException(null,
+                    "Flow file `" + path + "` contains duplicate JSON keys"
+                            + " (this typically indicates a merge conflict that was not fully resolved)"
+                            + ": " + e.getOriginalMessage(),
+                    e.getLocation());
         }
     }
 
@@ -667,8 +829,11 @@ public class FlowDiff {
     }
 
     static String printParameterContext(final VersionedParameterContext pc) {
+        if (pc == null || pc.getParameters() == null) {
+            return "{}";
+        }
         final Map<String, String> parameters = new HashMap<>();
-        for (VersionedParameter p : pc.getParameters()) {
+        for (final VersionedParameter p : pc.getParameters()) {
             if (p.isSensitive()) {
                 parameters.put(p.getName(), "<Sensitive Value>");
             } else {
@@ -679,7 +844,10 @@ public class FlowDiff {
     }
 
     static void printConfigurableExtensionProperties(final VersionedConfigurableExtension proc) {
-        for (String key : proc.getProperties().keySet()) {
+        if (proc.getProperties() == null) {
+            return;
+        }
+        for (final String key : proc.getProperties().keySet()) {
             System.out.println("  - `" + key + "` = `" + proc.getProperties().get(key) + "`");
         }
     }
@@ -706,26 +874,26 @@ public class FlowDiff {
 
         List<String> nonDefaultConfigurations = new ArrayList<>();
 
-        if (!connection.getLoadBalanceStrategy().equals("DO_NOT_LOAD_BALANCE")) {
+        if (!"DO_NOT_LOAD_BALANCE".equals(connection.getLoadBalanceStrategy())) {
             String lbConfiguration = "load balancing strategy `" + connection.getLoadBalanceStrategy() + "`";
-            if (connection.getLoadBalanceStrategy().equals("PARTITION_BY_ATTRIBUTE")) {
+            if ("PARTITION_BY_ATTRIBUTE".equals(connection.getLoadBalanceStrategy())) {
                 lbConfiguration += " and partitioning attribute `" + connection.getPartitioningAttribute() + "`";
             }
-            if (!connection.getLoadBalanceCompression().equals("DO_NOT_COMPRESS")) {
+            if (!"DO_NOT_COMPRESS".equals(connection.getLoadBalanceCompression())) {
                 lbConfiguration += " and load balancing compression `" + connection.getLoadBalanceCompression() + "`";
             }
             nonDefaultConfigurations.add(lbConfiguration);
         }
 
-        if (!connection.getPrioritizers().isEmpty()) {
+        if (connection.getPrioritizers() != null && !connection.getPrioritizers().isEmpty()) {
             nonDefaultConfigurations.add("prioritizers `" + connection.getPrioritizers() + "`");
         }
 
-        if (!connection.getFlowFileExpiration().equals("0 sec")) {
+        if (!"0 sec".equals(connection.getFlowFileExpiration())) {
             nonDefaultConfigurations.add("FlowFile expiration of `" + connection.getFlowFileExpiration() + "`");
         }
 
-        if (!connection.getBackPressureDataSizeThreshold().equals("1 GB")) {
+        if (!"1 GB".equals(connection.getBackPressureDataSizeThreshold())) {
             nonDefaultConfigurations.add("backpressure data size threshold of `" + connection.getBackPressureDataSizeThreshold() + "`");
         }
 

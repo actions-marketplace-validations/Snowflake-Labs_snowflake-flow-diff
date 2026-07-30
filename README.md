@@ -72,6 +72,31 @@ jobs:
 
 Note - you may want to change `grep  '\.json$'` with a more specific pattern to match your specific requirements.
 
+## Docker Image
+
+Each release also publishes a Docker image to the [GitHub Container Registry](https://github.com/snowflake-labs/snowflake-flow-diff/pkgs/container/snowflake-flow-diff). This is useful when you want to run the tool directly — for example in a GitLab CI pipeline or locally — without relying on the GitHub Action wrapper.
+
+```
+ghcr.io/snowflake-labs/snowflake-flow-diff:latest
+ghcr.io/snowflake-labs/snowflake-flow-diff:v0.0.24
+```
+
+The image entrypoint accepts the same positional arguments as the action inputs, in this order: `flowA`, `flowB`, `token`, `repository`, `issuenumber`, `checkstyle`, `checkstyle-rules`, `checkstyle-fail`, `api-url`, `flow-graph`.
+
+## GitHub Enterprise Server
+
+This action works with GitHub Enterprise Server (GHE) out of the box. The GitHub API URL is automatically detected via `github.api_url`. If you need to override it for any reason, you can explicitly set the `api-url` input:
+
+```yaml
+      - name: Snowflake Flow Diff
+        uses: snowflake-labs/snowflake-flow-diff@v0
+        id: flowdiff
+        with:
+          flowA: ${{ steps.files.outputs.flowA }}
+          flowB: ${{ steps.files.outputs.flowB }}
+          api-url: https://github.example.com/api/v3
+```
+
 ## Checkstyle
 
 Optionally, it is possible to enable a checkstyle check on the new version of the flow. If some violations against NiFi best practices are found, a message will be added to the comment published on the pull request.
@@ -149,6 +174,10 @@ The following table summarizes what each rule reports and which identifiers you 
 | `noSelfLoop` | Component name/type and UUID | Processor/Funnel UUID at both ends of the self-loop |
 | `enforcePrioritizer` | Connection description and UUID | Connection UUID (`VersionedConnection#getIdentifier`) |
 | `backpressureThreshold` | Connection description and UUID | Connection UUID (`VersionedConnection#getIdentifier`) |
+| `processorNaming` | Processor name, type, and UUID | Processor UUID (`VersionedProcessor#getIdentifier`) |
+| `controllerServiceNaming` | Controller Service name, type, and UUID | Controller Service UUID (`VersionedControllerService#getIdentifier`) |
+| `parameterContextNaming` | Parameter Context name | _Not applicable_ |
+| `parameterProviderNaming` | Parameter Provider name, type, and UUID | _Not applicable_ |
 
 Available rules:
 - `concurrentTasks` to check the number of concurrent tasks and define an upper limit (parameter: `limit`, default value is 2)
@@ -159,6 +188,98 @@ Available rules:
 - `noSelfLoop` to check if there are self-loop connections in the flow
 - `enforcePrioritizer` to check if all connections in the flow are set with the configured list of prioritizers (parameter: `prioritizers`, comma-separated list of expected prioritizers, example: `org.apache.nifi.prioritizer.FirstInFirstOutPrioritizer`)
 - `backpressureThreshold` to ensure each connection keeps both data size and object count backpressure thresholds greater than zero
+- `processorNaming` to validate processor names against regex patterns based on processor type (parameters: `patterns` map of fully qualified type to regex, optional `defaultPattern` for types not in the map). This rule produces no violations when no patterns are configured.
+- `controllerServiceNaming` to validate controller service names against regex patterns based on service type (parameters: `patterns` map of fully qualified type to regex, optional `defaultPattern` for types not in the map). This rule produces no violations when no patterns are configured.
+- `parameterContextNaming` to validate parameter context names against a regex pattern (parameters: `defaultPattern` regex, optional `exclude` list of exact names to skip). This rule produces no violations when no pattern is configured.
+- `parameterProviderNaming` to validate parameter provider names against regex patterns based on provider type (parameters: `patterns` map of fully qualified type to regex, optional `defaultPattern` for types not in the map). This rule produces no violations when no patterns are configured.
+
+### Naming convention rules
+
+The naming rules (`processorNaming`, `controllerServiceNaming`, `parameterContextNaming`, `parameterProviderNaming`) allow you to enforce custom naming conventions on NiFi components. They are no-ops without configuration, so they are safe to include without side effects.
+
+Patterns are evaluated with Java's `String.matches()`, which requires the **entire** name to match (as if the pattern were implicitly anchored with `^` and `$`). For example, to match names ending in `_SUFFIX`, use `.*_SUFFIX$` rather than `_SUFFIX$`.
+
+#### Processor naming
+
+Validate processor names by type. Use `patterns` to map fully qualified processor types to regex patterns, and `defaultPattern` as a fallback for types not explicitly listed:
+
+```yaml
+include:
+  - processorNaming
+rules:
+  processorNaming:
+    parameters:
+      patterns:
+        org.apache.nifi.processors.snowflake.PutSnowflakeInternalStage: ".*_ISTG$"
+        org.apache.nifi.processors.standard.ExecuteSQLRecord: ".*_(SEL|COPY|UPD_SEL|UPD_INS|EXT)$|^SP_.*"
+        org.apache.nifi.processors.standard.GenerateFlowFile: "^GENERATE_FLOW_FILE$"
+        org.apache.nifi.processors.standard.UpdateAttribute: "^UPDATE_ATTRIBUTE$"
+        org.apache.nifi.processors.standard.InvokeHTTP: ".*_EXT$"
+      defaultPattern: "^[A-Z][A-Z0-9_]+$"
+    componentExclusions:
+      "ProductionFlow.*":
+        - "some-processor-uuid-to-ignore"
+```
+
+#### Controller service naming
+
+Validate controller service names by type. Works the same as processor naming:
+
+```yaml
+include:
+  - controllerServiceNaming
+rules:
+  controllerServiceNaming:
+    parameters:
+      patterns:
+        org.apache.nifi.dbcp.DBCPConnectionPool: "^acme_(dev|preprod|prod)_[a-z0-9_]+$"
+      defaultPattern: "^[a-z][a-z0-9_]+$"
+```
+
+#### Parameter context naming
+
+Validate parameter context names against a single pattern. Use `exclude` to skip specific context names:
+
+```yaml
+include:
+  - parameterContextNaming
+rules:
+  parameterContextNaming:
+    parameters:
+      defaultPattern: "^acme_(dev|preprod|prod)_[a-z0-9_]+_(secrets|config)$"
+      exclude:
+        - "common_parameter_context"
+        - "common_sftp_serverkey"
+        - "CommonDatabaseDriversReference"
+```
+
+#### Parameter provider naming
+
+Validate parameter provider (management controller service) names by type:
+
+```yaml
+include:
+  - parameterProviderNaming
+rules:
+  parameterProviderNaming:
+    parameters:
+      patterns:
+        org.apache.nifi.parameter.aws.AwsSecretsManagerParameterProvider: "^acme_(dev|preprod|prod)_[a-z0-9_]+_secrets$"
+```
+
+All naming rules support the standard `overrides` mechanism to apply different patterns per flow name, and `componentExclusions` to silence violations for specific component UUIDs (where applicable). When a per-flow override specifies `patterns`, it replaces the entire top-level `patterns` map for matching flows rather than merging with it.
+
+## JSON Validation
+
+Before computing a diff, the action validates both flow files for duplicate JSON keys. Duplicate keys are not valid JSON and silently produce wrong diffs because parsers apply last-wins on repeated keys, discarding earlier occurrences. This commonly occurs when a merge conflict is not fully resolved.
+
+If a duplicate key is detected the action posts a `[!CAUTION]` block in the PR comment identifying the file and the exact line, then exits with a non-zero status code so the PR check is blocked until the file is fixed:
+
+```markdown
+> [!CAUTION]
+> Flow file `submitted-changes/flows/my-flow.json` contains duplicate JSON keys (this typically indicates a merge conflict that was not fully resolved): Duplicate field 'flowContents'
+> Line 37, column 17
+```
 
 ## Example
 
@@ -173,19 +294,25 @@ Here is an example of what the comment could look like:
 > - Processor named `UpdateAttribute` is configured with 4 concurrent tasks
 
 #### Flow Changes
+
+**`MyExample`** — 8 changes
 - The destination of a connection has changed from `UpdateAttribute` to `InvokeHTTP`
 - A self-loop connection `[success]` has been added on `UpdateAttribute`
 - A connection `[success]` from `My Generate FlowFile Processor` to `UpdateAttribute` has been added
 - A Processor of type `GenerateFlowFile` named `GenerateFlowFile` has been renamed from `GenerateFlowFile` to `My Generate FlowFile Processor`
 - In Processor of type `GenerateFlowFile` named `GenerateFlowFile`, the Scheduling Strategy changed from `TIMER_DRIVEN` to `CRON_DRIVEN`
-- A Parameter Context named `Test Parameter Context` has been added
 - The Parameter Context `Test Parameter Context` with parameters `{addedParam=newValue}` has been added to the process group `TestingFlowDiff`
 - A Processor of type `UpdateAttribute` named `UpdateAttribute` has been removed
 - In Processor of type `GenerateFlowFile` named `GenerateFlowFile`, the Run Schedule changed from `1 min` to `* * * * * ?`
-- A Parameter Context named `Another one to delete` has been added
+
+**`MyExample > Ingestion`** — 1 change
 - A Processor of type `UpdateAttribute` named `UpdateAttribute` has been added with the configuration [`ALL` nodes, `4` concurrent tasks, `0ms` run duration, `WARN` bulletin level, `TIMER_DRIVEN` (`0 sec`), `30 sec` penalty duration, `1 sec` yield duration] and the below properties:
   - `Store State` = `Do not store state`
   - `canonical-value-lookup-cache-size` = `100`
+
+**`(Parameter Contexts)`** — 2 changes
+- A Parameter Context named `Test Parameter Context` has been added
+- A Parameter Context named `Another one to delete` has been added
 
 #### Bundle Changes
 - The bundle `org.apache.nifi:nifi-standard-nar` has been changed from version `2.1.0` to version `2.2.0`
